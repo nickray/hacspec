@@ -268,19 +268,25 @@ macro_rules! _array_base {
         }
 
         impl $name {
-            fn hex_string_to_vec(s: &str) -> Vec<$t> {
-                debug_assert!(s.len() % core::mem::size_of::<$t>() == 0);
-                let b: Result<Vec<$t>, ParseIntError> = (0..s.len())
-                    .step_by(2)
-                    .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map(<$t>::from))
-                    .collect();
-                b.expect("Error parsing hex string")
-            }
-
             /// Read hex string to Bytes.
             #[cfg_attr(feature = "use_attributes", unsafe_hacspec($name))]
             pub fn from_hex(s: &str) -> $name {
-                let v = $name::hex_string_to_vec(s);
+                <$name as $crate::FromHex>::from_hex(s)
+            }
+        }
+
+        impl $crate::FromHex for $name {
+            const CHARS: usize = $l * <$t as FromHex>::CHARS;
+
+            fn from_hex(s: &str) -> $name {
+                const T_CHARS: usize = <$t as FromHex>::CHARS;
+
+                debug_assert_eq!(s.len(), Self::CHARS);
+                let v: Vec<$t> = (0..s.len())
+                    .step_by(T_CHARS)
+                    .map(|i| <$t>::from_hex(&s[i..i + T_CHARS]))
+                    .collect();
+
                 let mut o = $name::new();
                 debug_assert!(v.len() == $l);
                 for i in 0..$l {
@@ -289,6 +295,7 @@ macro_rules! _array_base {
                 o
             }
         }
+
     };
 }
 
@@ -663,8 +670,14 @@ macro_rules! _public_array {
         _array_base!($name, $l, $t);
 
         impl $name {
+            #[deprecated]
             #[cfg_attr(feature = "use_attributes", unsafe_hacspec($name))]
             pub fn into_le_bytes(self) -> Seq<u8> {
+                self.to_le_bytes()
+            }
+
+            #[cfg_attr(feature = "use_attributes", unsafe_hacspec($name))]
+            pub fn to_le_bytes(self) -> Seq<u8> {
                 const FACTOR: usize = core::mem::size_of::<$t>();
                 let mut out: Seq<u8> = Seq::new($l * FACTOR);
                 for i in 0..$l {
@@ -1033,3 +1046,56 @@ macro_rules! both_bytes {
         both_arrays!($public_name, $name, $l, U8, u8);
     };
 }
+
+pub trait FromHex {
+    const CHARS: usize;
+
+    fn from_hex(s: &str) -> Self;
+}
+
+impl FromHex for bool {
+    const CHARS: usize = 1;
+
+    fn from_hex(s: &str) -> Self {
+        u8::from_str_radix(s, 2).expect("Error parsing hex string") != 0
+    }
+}
+
+macro_rules! uint_from_hex {
+    ($t:ty) => {
+        impl FromHex for $t {
+            const CHARS: usize = 2 * core::mem::size_of::<$t>();
+
+            fn from_hex(s: &str) -> Self {
+                debug_assert_eq!(s.len(), Self::CHARS);
+                <$t>::from_str_radix(s, 16).expect("Error parsing hex string")
+            }
+        }
+    }
+}
+
+uint_from_hex!(u8);
+uint_from_hex!(u16);
+uint_from_hex!(u32);
+uint_from_hex!(u64);
+uint_from_hex!(u128);
+uint_from_hex!(usize);
+
+macro_rules! Uint_from_hex {
+    ($T:ident, $t:ty) => {
+        impl FromHex for $T {
+            const CHARS: usize = 2 * core::mem::size_of::<$t>();
+
+            fn from_hex(s: &str) -> Self {
+                $T(<$t>::from_hex(s))
+            }
+        }
+    }
+}
+
+use crate::{U8, U16, U32, U64, U128};
+Uint_from_hex!(U8, u8);
+Uint_from_hex!(U16, u16);
+Uint_from_hex!(U32, u32);
+Uint_from_hex!(U64, u64);
+Uint_from_hex!(U128, u128);
