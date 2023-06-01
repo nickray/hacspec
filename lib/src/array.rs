@@ -295,7 +295,6 @@ macro_rules! _array_base {
                 o
             }
         }
-
     };
 }
 
@@ -669,24 +668,26 @@ macro_rules! _public_array {
     ($name:ident,$l:expr,$t:ty) => {
         _array_base!($name, $l, $t);
 
-        impl $name {
-            #[deprecated]
-            #[cfg_attr(feature = "use_attributes", unsafe_hacspec($name))]
-            pub fn into_le_bytes(self) -> Seq<u8> {
-                self.to_le_bytes()
-            }
+        impl $crate::IntoLeBytes for $name {
+            const BYTES: usize = $l * <$t as $crate::IntoLeBytes>::BYTES;
 
-            #[cfg_attr(feature = "use_attributes", unsafe_hacspec($name))]
-            pub fn to_le_bytes(self) -> Seq<u8> {
-                const FACTOR: usize = core::mem::size_of::<$t>();
-                let mut out: Seq<u8> = Seq::new($l * FACTOR);
+            fn into_le_bytes(self) -> Seq<u8> {
+                let mut seq = Seq::new(Self::BYTES);
+                const T_BYTES: usize = <$t as $crate::IntoLeBytes>::BYTES;
                 for i in 0..$l {
-                    let tmp = <$t>::to_le_bytes(self[i]);
-                    for j in 0..FACTOR {
-                        out[i * FACTOR + j] = tmp[j];
+                    let entry = <$t as IntoLeBytes>::into_le_bytes(self[i]);
+                    for j in 0..T_BYTES {
+                        seq[i * T_BYTES + j] = entry[j];
                     }
                 }
-                out
+                seq
+            }
+        }
+
+        impl $name {
+            #[cfg_attr(feature = "use_attributes", unsafe_hacspec($name))]
+            pub fn into_le_bytes(self) -> Seq<u8> {
+                <$name as $crate::IntoLeBytes>::into_le_bytes(self)
             }
         }
 
@@ -1047,6 +1048,47 @@ macro_rules! both_bytes {
     };
 }
 
+use crate::Seq;
+
+pub trait IntoLeBytes {
+    const BYTES: usize;
+    fn into_le_bytes(self) -> Seq<u8>;
+}
+
+impl IntoLeBytes for bool {
+    const BYTES: usize = 1;
+    fn into_le_bytes(self) -> Seq<u8> {
+        let mut seq = Seq::new(1);
+        seq[0] = u8::from(self);
+        seq
+    }
+}
+
+macro_rules! uint_into_le_bytes {
+    ($t:ty) => {
+        impl IntoLeBytes for $t {
+            const BYTES: usize = core::mem::size_of::<$t>();
+
+            fn into_le_bytes(self) -> Seq<u8> {
+                let bytes = self.to_le_bytes();
+                let size = core::mem::size_of::<$t>();
+                let mut seq = Seq::new(size);
+                for i in 0..Self::BYTES {
+                    seq[i] = bytes[i];
+                }
+                seq
+            }
+        }
+    }
+}
+
+uint_into_le_bytes!(u8);
+uint_into_le_bytes!(u16);
+uint_into_le_bytes!(u32);
+uint_into_le_bytes!(u64);
+uint_into_le_bytes!(u128);
+uint_into_le_bytes!(usize);
+
 pub trait FromHex {
     const CHARS: usize;
 
@@ -1094,6 +1136,7 @@ macro_rules! Uint_from_hex {
 }
 
 use crate::{U8, U16, U32, U64, U128};
+
 Uint_from_hex!(U8, u8);
 Uint_from_hex!(U16, u16);
 Uint_from_hex!(U32, u32);
